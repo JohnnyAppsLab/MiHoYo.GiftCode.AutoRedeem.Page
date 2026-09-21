@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HoYoverse 登入驗證</title>
+<!--
+  Solves the captcha HoYoverse demands during a first password login, for the
+  MiHoYo GiftCode AutoRedeem Discord bot. See README.md.
+
+  This page is deliberately inert: the challenge arrives in the URL fragment (so it never reaches
+  this host's request logs) and the answer is shown for the user to copy back into Discord. Nothing
+  is posted anywhere, and no account credential ever passes through here — only a throwaway captcha
+  token that is useless on its own.
+
+  It is intentionally dependency-free and self-contained, so anyone told to click this link can read
+  the whole thing before trusting it.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1b1d21;
+    --muted: #61656d;
+    --border: #dfe2e7;
+    --accent: #4b6ef5;
+    --ok-bg: #e9f7ef;
+    --ok-border: #a8dcbd;
+    --err-bg: #fdeceb;
+    --err-border: #f0b4b0;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --card: #1e2126;
+      --text: #e8eaed;
+      --muted: #9aa0a8;
+      --border: #32363d;
+      --accent: #7b93ff;
+      --ok-bg: #1a2e22;
+      --ok-border: #2f6344;
+      --err-bg: #2f1d1c;
+      --err-border: #6b3a36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", sans-serif;
+  }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  #captcha { min-height: 60px; }
+  .status { color: var(--muted); font-size: 14px; }
+  .result { background: var(--ok-bg); border-color: var(--ok-border); }
+  .error { background: var(--err-bg); border-color: var(--err-border); }
+  textarea {
+    width: 100%;
+    min-height: 92px;
+    margin: 12px 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    word-break: break-all;
+    resize: vertical;
+  }
+  button {
+    width: 100%;
+    padding: 11px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:active { opacity: .85; }
+  ol { margin: 8px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>HoYoverse 登入驗證</h1>
+  <p class="sub">完成下方驗證後，把產生的結果貼回 Discord。</p>
+
+  <div class="card" id="challengeCard">
+    <div id="captcha"></div>
+    <p class="status" id="status">載入驗證中…</p>
+  </div>
+
+  <div class="card result" id="resultCard" hidden>
+    <strong>✅ 驗證完成</strong>
+    <p class="sub" style="margin:8px 0 0">複製下面整串，回到 Discord 點「貼上驗證結果」：</p>
+    <textarea id="result" readonly onclick="this.select()"></textarea>
+    <button id="copy">複製</button>
+    <ol>
+      <li>回到 Discord</li>
+      <li>點「貼上驗證結果」按鈕</li>
+      <li>貼上並送出</li>
+    </ol>
+  </div>
+
+  <div class="card error" id="errorCard" hidden>
+    <strong>⚠️ 無法載入驗證</strong>
+    <p class="sub" id="errorText" style="margin:8px 0 0"></p>
+  </div>
+</main>
+
+<script>
+(function () {
+  var statusEl = document.getElementById('status');
+
+  function fail(message) {
+    document.getElementById('challengeCard').hidden = true;
+    document.getElementById('errorText').textContent = message;
+    document.getElementById('errorCard').hidden = false;
+  }
+
+  function succeed(sessionId, payload) {
+    // The bot sends this straight back as the x-rpc-aigis header, so build its exact shape here:
+    // "{session_id};{base64 of the result JSON}".
+    var encoded = btoa(JSON.stringify(payload));
+    document.getElementById('challengeCard').hidden = true;
+    document.getElementById('result').value = sessionId + ';' + encoded;
+    document.getElementById('resultCard').hidden = false;
+  }
+
+  document.getElementById('copy').addEventListener('click', function () {
+    var box = document.getElementById('result');
+    box.select();
+    var done = function () { this.textContent = '已複製'; }.bind(this);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(box.value).then(done, function () { document.execCommand('copy'); done(); });
+    } else {
+      document.execCommand('copy');
+      done();
+    }
+  });
+
+  function load(src, onload) {
+    var s = document.createElement('script');
+    s.src = src;
+    s.onload = onload;
+    s.onerror = function () { fail('驗證元件載入失敗，請檢查網路連線後重新整理。'); };
+    document.head.appendChild(s);
+  }
+
+  // version:sessionId:gt:secondary — put in the fragment by the bot.
+  var token = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+  var parts = token.split(':');
+
+  if (parts.length !== 4 || !parts.every(Boolean)) {
+    fail('網址不完整或已損壞。請回到 Discord 重新取得連結（整串複製，不要只複製一部分）。');
+    return;
+  }
+
+  var version = parts[0], sessionId = parts[1], gt = parts[2], secondary = parts[3];
+
+  if (version === 'v3') {
+    load('https://static.geetest.com/static/tools/gt.js', function () {
+      window.initGeetest({
+        gt: gt,
+        challenge: secondary,
+        offline: false,
+        new_captcha: true,
+        product: 'popup',
+        lang: 'zh-tw'
+      }, function (captcha) {
+        captcha.appendTo('#captcha');
+        captcha.onReady(function () {
+          statusEl.textContent = '請完成上方驗證。';
+          captcha.verify();
+        });
+        captcha.onSuccess(function () {
+          var r = captcha.getValidate();
+          succeed(sessionId, {
+            geetest_challenge: r.geetest_challenge,
+            geetest_validate: r.geetest_validate,
+            geetest_seccode: r.geetest_seccode
+          });
+        });
+        captcha.onError(function () { fail('驗證過程發生錯誤，請重新整理再試一次。'); });
+      });
+    });
+    return;
+  }
+
+  if (version === 'v4') {
+    load('https://static.geetest.com/v4/gt4.js', function () {
+      window.initGeetest4({
+        captchaId: gt,
+        product: 'popup',
+        riskType: secondary,
+        language: 'zho-tw'
+      }, function (captcha) {
+        captcha.appendTo('#captcha');
+        captcha.onReady(function () {
+          statusEl.textContent = '請完成上方驗證。';
+          captcha.showCaptcha();
+        });
+        captcha.onSuccess(function () {
+          var r = captcha.getValidate();
+          succeed(sessionId, {
+            captcha_id: gt,
+            lot_number: r.lot_number,
+            pass_token: r.pass_token,
+            gen_time: r.gen_time,
+            captcha_output: r.captcha_output
+          });
+        });
+        captcha.onError(function () { fail('驗證過程發生錯誤，請重新整理再試一次。'); });
+      });
+    });
+    return;
+  }
+
+  fail('不支援的驗證類型：' + version);
+})();
+</script>
+</body>
+</html>
