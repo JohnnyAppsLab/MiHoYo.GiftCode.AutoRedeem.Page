@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
 <title>HoYoverse 登入驗證</title>
 <!--
   Solves the captcha HoYoverse demands during a first password login, for the
@@ -177,28 +178,27 @@
 
   var version = parts[0], sessionId = parts[1], gt = parts[2], secondary = parts[3];
 
+  // The parameters below are not cosmetic. A captcha solved without them satisfies Geetest but is
+  // then rejected by HoYoverse itself (retcode -3102): `userInfo` is what binds the answer to the
+  // login session it was issued for, and `apiServers` points at the Geetest deployment HoYoverse
+  // actually runs. The two steps of a login use different deployments, hence the split.
   if (version === 'v3') {
-    load('https://static.geetest.com/static/tools/gt.js', function () {
+    load('https://static.geetest.com/static/js/gt.0.5.0.js', function () {
       window.initGeetest({
         gt: gt,
         challenge: secondary,
-        offline: false,
         new_captcha: true,
-        product: 'popup',
+        api_server: 'api-na.geetest.com',
+        https: /^https/i.test(window.location.protocol),
+        product: 'bind',
         lang: 'zh-tw'
       }, function (captcha) {
-        captcha.appendTo('#captcha');
         captcha.onReady(function () {
-          statusEl.textContent = '請完成上方驗證。';
+          statusEl.textContent = '請完成驗證。';
           captcha.verify();
         });
         captcha.onSuccess(function () {
-          var r = captcha.getValidate();
-          succeed(sessionId, {
-            geetest_challenge: r.geetest_challenge,
-            geetest_validate: r.geetest_validate,
-            geetest_seccode: r.geetest_seccode
-          });
+          succeed(sessionId, captcha.getValidate());
         });
         captcha.onError(function () { fail('驗證過程發生錯誤，請重新整理再試一次。'); });
       });
@@ -210,24 +210,22 @@
     load('https://static.geetest.com/v4/gt4.js', function () {
       window.initGeetest4({
         captchaId: gt,
-        product: 'popup',
         riskType: secondary,
+        userInfo: JSON.stringify({ session_id: sessionId }),
+        apiServers: ['gcaptcha4.captchami.com'],
+        product: 'bind',
         language: 'zho-tw'
       }, function (captcha) {
-        captcha.appendTo('#captcha');
         captcha.onReady(function () {
-          statusEl.textContent = '請完成上方驗證。';
+          statusEl.textContent = '請完成驗證。';
           captcha.showCaptcha();
         });
         captcha.onSuccess(function () {
-          var r = captcha.getValidate();
-          succeed(sessionId, {
-            captcha_id: gt,
-            lot_number: r.lot_number,
-            pass_token: r.pass_token,
-            gen_time: r.gen_time,
-            captcha_output: r.captcha_output
-          });
+          // captcha_id is an input rather than an output, so supply it unless the widget echoes it.
+          var payload = { captcha_id: gt };
+          var validated = captcha.getValidate();
+          for (var k in validated) { if (Object.prototype.hasOwnProperty.call(validated, k)) payload[k] = validated[k]; }
+          succeed(sessionId, payload);
         });
         captcha.onError(function () { fail('驗證過程發生錯誤，請重新整理再試一次。'); });
       });
